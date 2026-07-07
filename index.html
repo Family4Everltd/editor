@@ -109,7 +109,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;background:
     <textarea id="p-ta" rows="4" placeholder="Type your text here..."></textarea>
     <div id="p-color-sec" style="display:none;margin-top:12px;">
       <button id="p-color-btn" type="button" onclick="toggleColorPanel()" style="width:100%;padding:10px;border-radius:9px;border:1px solid #252840;background:#0d0f1a;color:#b09040;font-size:.8rem;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px;">&#127912; Change Colour <span id="p-color-cur" style="width:14px;height:14px;border-radius:4px;border:1px solid #444;display:inline-block;"></span></button>
+      <button id="p-color-sel-btn" type="button" onclick="startSelColor()" style="display:none;width:100%;margin-top:8px;padding:10px;border-radius:9px;border:1px dashed #8b6914;background:#151824;color:#c9a96e;font-size:.78rem;font-weight:600;cursor:pointer;font-family:inherit;align-items:center;justify-content:center;gap:6px;">&#128396; Colour Selected Text: &ldquo;<span id="p-sel-preview" style="font-style:italic;"></span>&rdquo;</button>
       <div id="p-color-panel" style="display:none;margin-top:10px;padding:12px;border:1px solid #252840;border-radius:10px;background:#0d0f1a;">
+        <div id="p-color-mode" style="font-size:.68rem;color:#888;margin-bottom:8px;letter-spacing:.04em;">Applying to: whole text</div>
         <div id="p-swatches" style="display:grid;grid-template-columns:repeat(9,1fr);gap:6px;margin-bottom:10px;"></div>
         <div style="display:flex;gap:8px;align-items:center;">
           <input type="color" id="p-color-wheel" value="#8b6914" style="width:38px;height:30px;border:none;background:none;cursor:pointer;padding:0;" title="Pick any colour">
@@ -347,6 +349,7 @@ function openTxtPopup(html){
   document.getElementById('p-tag').textContent='Edit Text';
   document.getElementById('p-title').textContent=plain.trim().substring(0,60)||(plain.trim()||'(empty)');
   document.getElementById('p-ta').value=plain;
+  taBaseline=plain;
   document.getElementById('p-ta').style.display='block';
   document.getElementById('p-img-area').style.display='none';
   document.getElementById('p-apply').style.display='';
@@ -427,6 +430,7 @@ function closePopup(){document.getElementById('popup').style.display='none';}
 // ── TEXT COLOUR PICKER ─────────────────────────────────────
 var SWATCHES=['#4a3308','#5c4010','#6b4e10','#8b6914','#7a6020','#9a8040','#b09040','#c9a96e','#bfac88','#c8b898','#d4c4a8','#ddd0b8','#e8dcc8','#fff8e7','#ffffff','#000000','#333333','#777777'];
 var colorDirty=false;
+var colorMode='all', selRS=0, selRE=0, selBaseHTML=null, taBaseline='';
 function getIframeElByN(n){
   try{var d=getFrame().contentDocument||getFrame().contentWindow.document;return d.querySelector('[data-n="'+n+'"]');}catch(ex){return null;}
 }
@@ -447,7 +451,12 @@ function initColorUI(){
     var wheel=document.getElementById('p-color-wheel');
     wheel.addEventListener('input',function(){applyTextColor(this.value);});
     document.getElementById('p-color-hex').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();applyHexColor();}});
+    var __ta=document.getElementById('p-ta');
+    ['select','mouseup','keyup'].forEach(function(ev){__ta.addEventListener(ev,taSelChanged);});
   }
+  colorMode='all'; selBaseHTML=null;
+  document.getElementById('p-color-sel-btn').style.display='none';
+  document.getElementById('p-color-mode').textContent='Applying to: whole text';
   document.getElementById('p-color-panel').style.display='none';
   colorDirty=false;
   var el=getIframeElByN(lastN);
@@ -460,7 +469,51 @@ function initColorUI(){
 }
 function toggleColorPanel(){
   var p=document.getElementById('p-color-panel');
-  p.style.display=(p.style.display==='none')?'block':'none';
+  var opening=(p.style.display==='none');
+  if(opening){colorMode='all';document.getElementById('p-color-mode').textContent='Applying to: whole text';}
+  p.style.display=opening?'block':'none';
+}
+function taSelChanged(){
+  var ta=document.getElementById('p-ta');
+  var s=ta.selectionStart,e=ta.selectionEnd;
+  var btn=document.getElementById('p-color-sel-btn');
+  if(e>s){
+    selRS=s; selRE=e;
+    var t=ta.value.substring(s,e);
+    document.getElementById('p-sel-preview').textContent=t.length>26?t.slice(0,26)+'\u2026':t;
+    btn.style.display='flex';
+  } else { btn.style.display='none'; }
+}
+function startSelColor(){
+  colorMode='sel'; selBaseHTML=null;
+  var t=document.getElementById('p-sel-preview').textContent;
+  document.getElementById('p-color-mode').textContent='Applying to: selected text \u201c'+t+'\u201d';
+  document.getElementById('p-color-panel').style.display='block';
+}
+function wrapSelection(el,val){
+  var doc=el.ownerDocument;
+  if(selBaseHTML===null){
+    selBaseHTML=el.innerHTML;
+    undoStack.push({n:lastN,c:selBaseHTML});
+    changes++; updBadge();
+  } else { el.innerHTML=selBaseHTML; }
+  var walker=doc.createTreeWalker(el,NodeFilter.SHOW_TEXT,null);
+  var pos=0,sN=null,sO=0,eN=null,eO=0,node;
+  while((node=walker.nextNode())){
+    var len=node.nodeValue.length;
+    if(sN===null && selRS<pos+len){sN=node;sO=selRS-pos;}
+    if(selRE<=pos+len){eN=node;eO=selRE-pos;break;}
+    pos+=len;
+  }
+  if(!sN||!eN) return false;
+  var range=doc.createRange();
+  range.setStart(sN,sO); range.setEnd(eN,eO);
+  var span=doc.createElement('span');
+  span.style.setProperty('color',val,'important');
+  span.style.setProperty('-webkit-text-fill-color',val,'important');
+  try{ range.surroundContents(span); }
+  catch(ex){ var frag=range.extractContents(); span.appendChild(frag); range.insertNode(span); }
+  return true;
 }
 function persistColorChange(){
   if(!colorDirty){
@@ -479,6 +532,20 @@ function persistColorChange(){
 function applyTextColor(val){
   if(lastN===null) return;
   var el=getIframeElByN(lastN); if(!el) return;
+  if(colorMode==='sel'){
+    if(!wrapSelection(el,val)) return;
+    document.getElementById('p-color-cur').style.background=val;
+    document.getElementById('p-color-wheel').value=val;
+    document.getElementById('p-color-hex').value=val;
+    clearTimeout(window.__colT);
+    window.__colT=setTimeout(function(){
+      getIframeHTML(function(html){
+        cleanHTML=html;
+        try{localStorage.setItem('oa_snap',cleanHTML); localStorage.setItem('oa_cnt',changes.toString());}catch(ex){}
+      });
+    },350);
+    return;
+  }
   if(!el.hasAttribute('data-oldcol')) el.setAttribute('data-oldcol', el.style.color||'');
   el.style.setProperty('color',val,'important');
   el.style.setProperty('-webkit-text-fill-color',val,'important');
@@ -506,6 +573,7 @@ function resetTextColor(){
 
 function applyEdit(){
   var v=document.getElementById('p-ta').value;
+  if(v===taBaseline){ closePopup(); return; }
   undoStack.push({n:lastN,c:lastOld});
   send({t:'txtupd',n:lastN,c:v});
   changes++; updBadge(); closePopup();
