@@ -123,7 +123,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;background:
     </div>
     <div id="p-img-area">
       <img id="p-img-prev" alt="">
-      <div id="p-rz-note" style="font-size:.72rem;color:#22c55e;margin:6px 0 2px;text-align:center;">&#8596; Drag the green corner dots on the image itself to resize it</div>
+      <div id="p-rz-note" style="font-size:.72rem;color:#22c55e;margin:6px 0 2px;text-align:center;">&#8596; Drag the green corners to resize &nbsp;&bull;&nbsp; Hold the image itself &amp; drag to move it</div>
       <button id="p-img-up" onclick="document.getElementById('img-in').click()">&#128193; Upload New Image</button>
       
       <!-- CROP AREA -->
@@ -437,7 +437,8 @@ function attachResizer(n){
   detachResizer();
   rz.n=n; var el=getIframeElByN(n); if(!el){rz.n=null;return;}
   var box=document.createElement('div'); box.id='rz-box';
-  box.style.cssText='position:fixed;pointer-events:none;border:1.5px dashed #22c55e;z-index:99997;box-sizing:border-box;';
+  box.style.cssText='position:fixed;pointer-events:auto;cursor:move;border:1.5px dashed #22c55e;z-index:99997;box-sizing:border-box;background:rgba(34,197,94,.06);';
+  box.addEventListener('pointerdown',mvStart);
   ['nw','ne','sw','se'].forEach(function(pos){
     var h=document.createElement('div');
     h.setAttribute('data-pos',pos);
@@ -448,7 +449,7 @@ function attachResizer(n){
     box.appendChild(h);
   });
   document.body.appendChild(box);
-  rz.box=box; rz.dirty=false;
+  rz.box=box; rz.dirty=false; mvDirty=false;
   rzReposition();
   try{getFrame().contentWindow.addEventListener('scroll',rzReposition,true);}catch(ex){}
   window.addEventListener('resize',rzReposition);
@@ -528,6 +529,73 @@ function rzEnd(e){
   document.body.style.webkitUserSelect='';
   document.body.style.cursor='';
   rzDrag=null;
+  clearTimeout(window.__rzT);
+  window.__rzT=setTimeout(function(){
+    getIframeHTML(function(html){
+      cleanHTML=html;
+      try{localStorage.setItem('oa_snap',cleanHTML); localStorage.setItem('oa_cnt',changes.toString());}catch(ex){}
+    });
+  },300);
+}
+
+// ── IMAGE MOVE (hold & drag) ───────────────────────────────
+var mvDrag=null, mvDirty=false;
+function mvStart(e){
+  if(e.target!==rz.box) return;
+  e.preventDefault(); e.stopPropagation();
+  var el=rzEl(); if(!el) return;
+  if(!mvDirty){
+    undoStack.push({n:rz.n, mvT:el.style.transform||''});
+    changes++; updBadge(); mvDirty=true;
+  }
+  var bx=parseFloat(el.getAttribute('data-mx'))||0, by=parseFloat(el.getAttribute('data-my'))||0;
+  mvDrag={x:e.clientX,y:e.clientY,bx:bx,by:by,nx:e.clientX,ny:e.clientY,raf:0};
+  try{ if(e.pointerId!==undefined) rz.box.setPointerCapture(e.pointerId); }catch(ex){}
+  rz.box.addEventListener('pointermove',mvMove);
+  rz.box.addEventListener('pointerup',mvEnd);
+  rz.box.addEventListener('pointercancel',mvEnd);
+  document.addEventListener('mousemove',mvMove);
+  document.addEventListener('mouseup',mvEnd);
+  try{ getFrame().style.pointerEvents='none'; }catch(ex){}
+  document.body.style.userSelect='none';
+  document.body.style.webkitUserSelect='none';
+  document.body.style.cursor='grabbing';
+  rz.box.style.cursor='grabbing';
+}
+function mvApply(){
+  if(!mvDrag) return; mvDrag.raf=0;
+  var el=rzEl(); if(!el) return;
+  var tx=Math.round(mvDrag.bx+(mvDrag.nx-mvDrag.x));
+  var ty=Math.round(mvDrag.by+(mvDrag.ny-mvDrag.y));
+  el.setAttribute('data-mx',tx); el.setAttribute('data-my',ty);
+  el.style.setProperty('transform','translate('+tx+'px,'+ty+'px)','important');
+  rzReposition();
+}
+function mvMove(e){
+  if(!mvDrag) return;
+  mvDrag.nx=e.clientX; mvDrag.ny=e.clientY;
+  if(!mvDrag.raf) mvDrag.raf=requestAnimationFrame(mvApply);
+  if(e.cancelable) e.preventDefault();
+}
+function mvEnd(e){
+  if(!mvDrag) return;
+  if(mvDrag.raf){ cancelAnimationFrame(mvDrag.raf); mvDrag.raf=0; }
+  if(e && e.clientX!==undefined){ mvDrag.nx=e.clientX; mvDrag.ny=e.clientY; }
+  mvApply();
+  if(rz.box){
+    rz.box.removeEventListener('pointermove',mvMove);
+    rz.box.removeEventListener('pointerup',mvEnd);
+    rz.box.removeEventListener('pointercancel',mvEnd);
+    try{ if(e && e.pointerId!==undefined) rz.box.releasePointerCapture(e.pointerId); }catch(ex){}
+    rz.box.style.cursor='move';
+  }
+  document.removeEventListener('mousemove',mvMove);
+  document.removeEventListener('mouseup',mvEnd);
+  try{ getFrame().style.pointerEvents=''; }catch(ex){}
+  document.body.style.userSelect='';
+  document.body.style.webkitUserSelect='';
+  document.body.style.cursor='';
+  mvDrag=null;
   clearTimeout(window.__rzT);
   window.__rzT=setTimeout(function(){
     getIframeHTML(function(html){
@@ -710,6 +778,17 @@ function handleImg(e){
 function undoLast(){
   if(!undoStack.length) return;
   var p=undoStack.pop();
+  if(p.mvT!==undefined){
+    var mel=getIframeElByN(p.n);
+    if(mel){
+      if(p.mvT){mel.style.setProperty('transform',p.mvT,'important');}else{mel.style.removeProperty('transform');}
+      mel.removeAttribute('data-mx'); mel.removeAttribute('data-my');
+    }
+    if(rz.n===p.n) rzReposition();
+    changes=Math.max(0,changes-1); updBadge();
+    setTimeout(function(){getIframeHTML(function(html){cleanHTML=html;try{localStorage.setItem('oa_snap',cleanHTML);localStorage.setItem('oa_cnt',changes.toString());}catch(ex){}});},200);
+    return;
+  }
   if(p.szW!==undefined){
     var zel=getIframeElByN(p.n);
     if(zel){
