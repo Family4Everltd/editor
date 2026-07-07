@@ -123,6 +123,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;background:
     </div>
     <div id="p-img-area">
       <img id="p-img-prev" alt="">
+      <div id="p-rz-note" style="font-size:.72rem;color:#22c55e;margin:6px 0 2px;text-align:center;">&#8596; Drag the green corner dots on the image itself to resize it</div>
       <button id="p-img-up" onclick="document.getElementById('img-in').click()">&#128193; Upload New Image</button>
       
       <!-- CROP AREA -->
@@ -371,6 +372,7 @@ function openImgPopup(src, w, h, nw, nh){
   document.getElementById('p-img-area').style.display='flex';
   document.getElementById('p-apply').style.display='none';
   document.getElementById('popup').style.display='flex';
+  attachResizer(lastN);
 
   var dimsEl = document.getElementById('p-img-dims');
   if (!dimsEl) {
@@ -425,7 +427,85 @@ function openImgPopup(src, w, h, nw, nh){
   targetH = h || 600;
 }
 
-function closePopup(){document.getElementById('popup').style.display='none';}
+function closePopup(){document.getElementById('popup').style.display='none';detachResizer();}
+
+// ── IMAGE RESIZER (drag corners) ───────────────────────────
+var rz={n:null,box:null,dirty:false};
+var rzDrag=null;
+function rzEl(){ return rz.n!==null ? getIframeElByN(rz.n) : null; }
+function attachResizer(n){
+  detachResizer();
+  rz.n=n; var el=getIframeElByN(n); if(!el){rz.n=null;return;}
+  var box=document.createElement('div'); box.id='rz-box';
+  box.style.cssText='position:fixed;pointer-events:none;border:1.5px dashed #22c55e;z-index:99997;box-sizing:border-box;';
+  ['nw','ne','sw','se'].forEach(function(pos){
+    var h=document.createElement('div');
+    h.setAttribute('data-pos',pos);
+    h.style.cssText='position:absolute;width:14px;height:14px;background:#22c55e;border:2px solid #fff;border-radius:50%;pointer-events:auto;cursor:'+pos+'-resize;box-shadow:0 1px 4px rgba(0,0,0,.4);';
+    if(pos.indexOf('n')>=0){h.style.top='-8px';}else{h.style.bottom='-8px';}
+    if(pos.indexOf('w')>=0){h.style.left='-8px';}else{h.style.right='-8px';}
+    h.addEventListener('mousedown',rzStart);
+    box.appendChild(h);
+  });
+  document.body.appendChild(box);
+  rz.box=box; rz.dirty=false;
+  rzReposition();
+  try{getFrame().contentWindow.addEventListener('scroll',rzReposition,true);}catch(ex){}
+  window.addEventListener('resize',rzReposition);
+}
+function rzReposition(){
+  var el=rzEl(); if(!el||!rz.box) return;
+  var fr=getFrame().getBoundingClientRect();
+  var r=el.getBoundingClientRect();
+  rz.box.style.left=(fr.left+r.left)+'px';
+  rz.box.style.top=(fr.top+r.top)+'px';
+  rz.box.style.width=r.width+'px';
+  rz.box.style.height=r.height+'px';
+}
+function detachResizer(){
+  if(rz.box){rz.box.remove();rz.box=null;}
+  try{getFrame().contentWindow.removeEventListener('scroll',rzReposition,true);}catch(ex){}
+  window.removeEventListener('resize',rzReposition);
+  rz.n=null; rzDrag=null;
+}
+function rzStart(e){
+  e.preventDefault(); e.stopPropagation();
+  var el=rzEl(); if(!el) return;
+  var r=el.getBoundingClientRect();
+  if(!rz.dirty){
+    undoStack.push({n:rz.n, szW:el.style.width||'', szH:el.style.height||'', szMW:el.style.maxWidth||'', szOF:el.style.objectFit||''});
+    changes++; updBadge(); rz.dirty=true;
+  }
+  rzDrag={pos:e.target.getAttribute('data-pos'), x:e.clientX, y:e.clientY, w:r.width, h:r.height};
+  document.addEventListener('mousemove',rzMove);
+  document.addEventListener('mouseup',rzEnd);
+}
+function rzMove(e){
+  if(!rzDrag) return;
+  var el=rzEl(); if(!el) return;
+  var dx=e.clientX-rzDrag.x, dy=e.clientY-rzDrag.y;
+  var w=rzDrag.w+(rzDrag.pos.indexOf('w')>=0?-dx:dx);
+  var h=rzDrag.h+(rzDrag.pos.indexOf('n')>=0?-dy:dy);
+  w=Math.max(30,w); h=Math.max(30,h);
+  el.style.setProperty('width',Math.round(w)+'px','important');
+  el.style.setProperty('height',Math.round(h)+'px','important');
+  el.style.setProperty('max-width','none','important');
+  if(el.tagName==='IMG') el.style.setProperty('object-fit','cover','important');
+  rzReposition();
+}
+function rzEnd(){
+  if(!rzDrag) return;
+  rzDrag=null;
+  document.removeEventListener('mousemove',rzMove);
+  document.removeEventListener('mouseup',rzEnd);
+  clearTimeout(window.__rzT);
+  window.__rzT=setTimeout(function(){
+    getIframeHTML(function(html){
+      cleanHTML=html;
+      try{localStorage.setItem('oa_snap',cleanHTML); localStorage.setItem('oa_cnt',changes.toString());}catch(ex){}
+    });
+  },300);
+}
 
 // ── TEXT COLOUR PICKER ─────────────────────────────────────
 var SWATCHES=['#4a3308','#5c4010','#6b4e10','#8b6914','#7a6020','#9a8040','#b09040','#c9a96e','#bfac88','#c8b898','#d4c4a8','#ddd0b8','#e8dcc8','#fff8e7','#ffffff','#000000','#333333','#777777'];
@@ -600,6 +680,19 @@ function handleImg(e){
 function undoLast(){
   if(!undoStack.length) return;
   var p=undoStack.pop();
+  if(p.szW!==undefined){
+    var zel=getIframeElByN(p.n);
+    if(zel){
+      if(p.szW){zel.style.setProperty('width',p.szW,'important');}else{zel.style.removeProperty('width');}
+      if(p.szH){zel.style.setProperty('height',p.szH,'important');}else{zel.style.removeProperty('height');}
+      if(p.szMW){zel.style.setProperty('max-width',p.szMW,'important');}else{zel.style.removeProperty('max-width');}
+      if(p.szOF){zel.style.setProperty('object-fit',p.szOF,'important');}else if(zel.tagName==='IMG'){zel.style.removeProperty('object-fit');}
+    }
+    if(rz.n===p.n) rzReposition();
+    changes=Math.max(0,changes-1); updBadge();
+    setTimeout(function(){getIframeHTML(function(html){cleanHTML=html;try{localStorage.setItem('oa_snap',cleanHTML);localStorage.setItem('oa_cnt',changes.toString());}catch(ex){}});},200);
+    return;
+  }
   if(p.col!==undefined){
     var cel=getIframeElByN(p.n);
     if(cel){
