@@ -107,6 +107,18 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Inter",sans-serif;background:
   </div>
   <div id="p-body">
     <textarea id="p-ta" rows="4" placeholder="Type your text here..."></textarea>
+    <div id="p-color-sec" style="display:none;margin-top:12px;">
+      <button id="p-color-btn" type="button" onclick="toggleColorPanel()" style="width:100%;padding:10px;border-radius:9px;border:1px solid #252840;background:#0d0f1a;color:#b09040;font-size:.8rem;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px;">&#127912; Change Colour <span id="p-color-cur" style="width:14px;height:14px;border-radius:4px;border:1px solid #444;display:inline-block;"></span></button>
+      <div id="p-color-panel" style="display:none;margin-top:10px;padding:12px;border:1px solid #252840;border-radius:10px;background:#0d0f1a;">
+        <div id="p-swatches" style="display:grid;grid-template-columns:repeat(9,1fr);gap:6px;margin-bottom:10px;"></div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="color" id="p-color-wheel" value="#8b6914" style="width:38px;height:30px;border:none;background:none;cursor:pointer;padding:0;" title="Pick any colour">
+          <input type="text" id="p-color-hex" placeholder="#hex code" maxlength="7" style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid #252840;background:#151824;color:#e0e0e0;font-size:.8rem;font-family:inherit;">
+          <button type="button" onclick="applyHexColor()" style="padding:8px 12px;border-radius:8px;border:none;background:#8b6914;color:#fff;font-size:.75rem;font-weight:700;cursor:pointer;font-family:inherit;">Apply</button>
+          <button type="button" onclick="resetTextColor()" title="Remove custom colour" style="padding:8px 10px;border-radius:8px;border:1px solid #252840;background:transparent;color:#888;font-size:.75rem;cursor:pointer;font-family:inherit;">Reset</button>
+        </div>
+      </div>
+    </div>
     <div id="p-img-area">
       <img id="p-img-prev" alt="">
       <button id="p-img-up" onclick="document.getElementById('img-in').click()">&#128193; Upload New Image</button>
@@ -339,12 +351,15 @@ function openTxtPopup(html){
   document.getElementById('p-img-area').style.display='none';
   document.getElementById('p-apply').style.display='';
   document.getElementById('p-apply').onclick = applyEdit;
+  document.getElementById('p-color-sec').style.display='block';
+  initColorUI();
   document.getElementById('popup').style.display='flex';
   setTimeout(function(){var ta=document.getElementById('p-ta');ta.focus();ta.select();},80);
 }
 
 function openImgPopup(src, w, h, nw, nh){
   document.getElementById('p-tag').textContent='Image';
+  document.getElementById('p-color-sec').style.display='none';
   document.getElementById('p-title').textContent=src.startsWith('data:')?'Embedded image':src.split('/').pop().substring(0,50);
   document.getElementById('p-ta').style.display='none';
   
@@ -409,6 +424,86 @@ function openImgPopup(src, w, h, nw, nh){
 
 function closePopup(){document.getElementById('popup').style.display='none';}
 
+// ── TEXT COLOUR PICKER ─────────────────────────────────────
+var SWATCHES=['#4a3308','#5c4010','#6b4e10','#8b6914','#7a6020','#9a8040','#b09040','#c9a96e','#bfac88','#c8b898','#d4c4a8','#ddd0b8','#e8dcc8','#fff8e7','#ffffff','#000000','#333333','#777777'];
+var colorDirty=false;
+function getIframeElByN(n){
+  try{var d=getFrame().contentDocument||getFrame().contentWindow.document;return d.querySelector('[data-n="'+n+'"]');}catch(ex){return null;}
+}
+function rgb2hex(c){
+  var m=(c||'').match(/rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+  if(!m) return '#8b6914';
+  return '#'+[m[1],m[2],m[3]].map(function(x){return ('0'+parseInt(x,10).toString(16)).slice(-2);}).join('');
+}
+function initColorUI(){
+  var g=document.getElementById('p-swatches');
+  if(g && !g.childNodes.length){
+    SWATCHES.forEach(function(c){
+      var b=document.createElement('button'); b.type='button';
+      b.style.cssText='width:100%;aspect-ratio:1;border-radius:6px;border:1px solid #333;cursor:pointer;background:'+c+';padding:0;';
+      b.title=c; b.onclick=function(){applyTextColor(c);};
+      g.appendChild(b);
+    });
+    var wheel=document.getElementById('p-color-wheel');
+    wheel.addEventListener('input',function(){applyTextColor(this.value);});
+    document.getElementById('p-color-hex').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();applyHexColor();}});
+  }
+  document.getElementById('p-color-panel').style.display='none';
+  colorDirty=false;
+  var el=getIframeElByN(lastN);
+  if(el){
+    var cur=rgb2hex(getComputedStyle(el).color);
+    document.getElementById('p-color-cur').style.background=cur;
+    document.getElementById('p-color-wheel').value=cur;
+    document.getElementById('p-color-hex').value=cur;
+  }
+}
+function toggleColorPanel(){
+  var p=document.getElementById('p-color-panel');
+  p.style.display=(p.style.display==='none')?'block':'none';
+}
+function persistColorChange(){
+  if(!colorDirty){
+    var el=getIframeElByN(lastN);
+    undoStack.push({n:lastN,col:(el&&el.getAttribute('data-oldcol'))||''});
+    changes++; updBadge(); colorDirty=true;
+  }
+  clearTimeout(window.__colT);
+  window.__colT=setTimeout(function(){
+    getIframeHTML(function(html){
+      cleanHTML=html;
+      try{localStorage.setItem('oa_snap',cleanHTML); localStorage.setItem('oa_cnt',changes.toString());}catch(ex){}
+    });
+  },350);
+}
+function applyTextColor(val){
+  if(lastN===null) return;
+  var el=getIframeElByN(lastN); if(!el) return;
+  if(!el.hasAttribute('data-oldcol')) el.setAttribute('data-oldcol', el.style.color||'');
+  el.style.setProperty('color',val,'important');
+  el.style.setProperty('-webkit-text-fill-color',val,'important');
+  document.getElementById('p-color-cur').style.background=val;
+  document.getElementById('p-color-wheel').value=val;
+  document.getElementById('p-color-hex').value=val;
+  persistColorChange();
+}
+function applyHexColor(){
+  var v=(document.getElementById('p-color-hex').value||'').trim();
+  if(!/^#?[0-9a-fA-F]{6}$/.test(v)) { alert('Enter a valid hex code like #8b6914'); return; }
+  if(v[0]!=='#') v='#'+v;
+  applyTextColor(v);
+}
+function resetTextColor(){
+  if(lastN===null) return;
+  var el=getIframeElByN(lastN); if(!el) return;
+  el.style.removeProperty('color');
+  el.style.removeProperty('-webkit-text-fill-color');
+  el.removeAttribute('data-oldcol');
+  var cur=rgb2hex(getComputedStyle(el).color);
+  document.getElementById('p-color-cur').style.background=cur;
+  persistColorChange();
+}
+
 function applyEdit(){
   var v=document.getElementById('p-ta').value;
   undoStack.push({n:lastN,c:lastOld});
@@ -437,6 +532,17 @@ function handleImg(e){
 function undoLast(){
   if(!undoStack.length) return;
   var p=undoStack.pop();
+  if(p.col!==undefined){
+    var cel=getIframeElByN(p.n);
+    if(cel){
+      if(p.col){cel.style.setProperty('color',p.col,'important');cel.style.setProperty('-webkit-text-fill-color',p.col,'important');}
+      else{cel.style.removeProperty('color');cel.style.removeProperty('-webkit-text-fill-color');}
+      cel.removeAttribute('data-oldcol');
+    }
+    changes=Math.max(0,changes-1); updBadge();
+    setTimeout(function(){getIframeHTML(function(html){cleanHTML=html;try{localStorage.setItem('oa_snap',cleanHTML);localStorage.setItem('oa_cnt',changes.toString());}catch(ex){}});},200);
+    return;
+  }
   var isImg = p.c && (p.c.indexOf('data:image/') === 0 || p.c.match(/\.(jpg|jpeg|png|gif|webp|svg)(\?|$)/i));
   var applied = false;
   if(isImg) applied = applyIframeSrc(p.n, p.c);
