@@ -604,7 +604,7 @@ function mvStart(e){
   e.preventDefault(); e.stopPropagation();
   var el=rzEl(); if(!el) return;
   var bx=parseFloat(el.getAttribute('data-mx'))||0, by=parseFloat(el.getAttribute('data-my'))||0;
-  mvDrag={x:e.clientX,y:e.clientY,bx:bx,by:by,nx:e.clientX,ny:e.clientY,raf:0,origT:el.style.transform||''};
+  mvDrag={x:e.clientX,y:e.clientY,bx:bx,by:by,nx:e.clientX,ny:e.clientY,raf:0,origT:el.style.translate||''};
   try{ if(e.pointerId!==undefined) rz.box.setPointerCapture(e.pointerId); }catch(ex){}
   rz.box.addEventListener('pointermove',mvMove);
   rz.box.addEventListener('pointerup',mvEnd);
@@ -629,7 +629,7 @@ function mvApply(){
   var tx=Math.round(mvDrag.bx+ddx);
   var ty=Math.round(mvDrag.by+ddy);
   el.setAttribute('data-mx',tx); el.setAttribute('data-my',ty);
-  el.style.setProperty('transform','translate('+tx+'px,'+ty+'px)','important');
+  el.style.setProperty('translate',tx+'px '+ty+'px','important');
   rzReposition();
 }
 function mvMove(e){
@@ -909,7 +909,7 @@ function undoLast(){
   if(p.mvT!==undefined){
     var mel=(p.elRef&&p.elRef.isConnected)?p.elRef:rzTarget(getIframeElByN(p.n));
     if(mel){
-      if(p.mvT){mel.style.setProperty('transform',p.mvT,'important');}else{mel.style.removeProperty('transform');}
+      if(p.mvT){mel.style.setProperty('translate',p.mvT,'important');}else{mel.style.removeProperty('translate');}
       mel.removeAttribute('data-mx'); mel.removeAttribute('data-my');
     }
     if(rz.n===p.n) rzReposition();
